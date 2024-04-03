@@ -26,6 +26,7 @@ class Literal(NamedTuple):
     feature : str
     first_value : InternedString
     last_value : InternedString
+    repeated : bool = False
 
     def __str__(self):
         if self.is_prefix():
@@ -61,6 +62,7 @@ class DisjunctiveGroup(NamedTuple):
     offset : int
     features : Tuple[str]
     literals : Tuple[Literal]
+    repeated : bool = False
 
     def __str__(self):
         string = ""

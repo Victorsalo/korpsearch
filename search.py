@@ -1,6 +1,7 @@
 
 import hashlib
 from pathlib import Path
+from itertools import count, groupby
 import logging
 import json
 import time
@@ -52,18 +53,25 @@ def collect_and_sort_prefix(index_view:IndexSet, tmpfile:Path, offset:int=0, byt
 def run_outer(query:Query, results_file:Path, use_internal:bool=False) -> IndexSet:
     tmp_results = Path("tmp_results")
     union = None
-    for disjunct in query.expand():
-        partial_query = Query(query.corpus, disjunct)
-        partial_results = run_query(partial_query, tmp_results, use_internal)
-        if union:
-            union.merge_update(
-                partial_results,
-                None, use_internal=use_internal,
-                merge_type=MergeType.UNION
-            )
-        else: union = partial_results
-        try: clean_up(tmp_results, [".ia", ".ia-cfg"])
-        except FileNotFoundError: pass
+    repeated = []
+    for i, lit in enumerate([lit for lit in query.literals if lit.repeated]):
+        small_q = Query(query.corpus, [lit])
+        results = small_q.index().search(small_q.instance(), offset=small_q.offset())
+        repeated.append((i, max((sum(1 for _ in group) for _, group in groupby(results, key=lambda x, c=count(): next(c) - x)))))
+        breakpoint()
+    for strand in query.repetition_expand(repeated):
+        for disjunct in strand.disjunctive_expand():
+            partial_query = Query(strand.corpus, disjunct)
+            partial_results = run_query(partial_query, tmp_results, use_internal)
+            if union:
+                union.merge_update(
+                    partial_results,
+                    None, use_internal=use_internal,
+                    merge_type=MergeType.UNION
+                )
+            else: union = partial_results
+            try: clean_up(tmp_results, [".ia", ".ia-cfg"])
+            except FileNotFoundError: pass
     return union
 
 def run_query(query:Query, results_file:Path, use_internal:bool=False) -> IndexSet:

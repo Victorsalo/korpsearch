@@ -14,8 +14,10 @@ from disk import InternedString
 QueryElement = Union[Literal, DisjunctiveGroup]
 
 class Query:
-    query_regex = re.compile(r'^ (\[ (\|? [\w_]+   !?  = " [^"]+ " )* \])+ $', re.X)
-    token_regex = re.compile(r'  (\|?)(   [\w_]+) (!?) = "([^"]+)"          ', re.X)
+    # Should use something like conditional matching to validate matching parenthesis.
+    query_regex = re.compile(r'^ ( \[(\|?   [\w_]+   !?  = " [^"]+ " )* \] \*? )+$', re.X)
+    # For now we only support one search term for testing purposes
+    token_regex = re.compile(r'      (\|?)( [\w_]+) (!?) = "([^"]+)" ]?     (\*)?   ', re.X)
 
     corpus : Corpus
     literals : List[QueryElement]
@@ -100,11 +102,23 @@ class Query:
     def contains_disjunction(self) -> bool:
         return any(isinstance(lit, DisjunctiveGroup) for lit in self.literals)
 
-    def expand(self) -> Iterator[Literal]:
+    def disjunctive_expand(self) -> Iterator[Literal]:
         groups = [group.literals for group in self.literals if isinstance(group, DisjunctiveGroup)]
         singles = [lit for lit in self.literals if isinstance(lit, Literal)]
         for group in itertools.product(*groups):
             yield singles + list(group)
+
+    # Maybe remove this.
+    def repetition_expand(self, repetitions:List[Tuple[int, Literal]]) -> Iterator[Literal]:
+        # Have to handle the case when we only have one literal to not find everything
+        # Create list of combinations and amounts of added words to later iterate over and yeild.
+        # Might be smart to not create the list like youd think but maybe.
+        big_list = [zip(range(i), [lit] * i) for i, lit in repetitions]
+        for combinations in itertools.product(big_list):
+            for test in combinations:
+                breakpoint()
+            yield self
+        # Use some sort of itertool here to create all combinations between these.
 
     def subqueries(self) -> Iterator['Query']:
         # Subqueries are generated in decreasing order of complexity
@@ -155,13 +169,14 @@ class Query:
         for offset, token in enumerate(tokens):
             query_list : List[List[Literal]] = [[]]
             for match in Query.token_regex.finditer(token):
-                or_separator, feature, negated, value = match.groups()
+                or_separator, feature, negated, value, repeated = match.groups()
                 feature = feature.lower()
                 negative = (negated == '!')
+                repeat = (repeated == '*')
                 is_prefix = False
                 if value.startswith('*') and value.endswith('*'):
                     contain_matches = corpus.get_all_matches(feature, value.strip('*'))
-                    contain_literals = [Literal(negative, offset, feature, match, match) for match in contain_matches]
+                    contain_literals = [Literal(negative, offset, feature, match, match, repeat) for match in contain_matches]
                     last_group = query_list.pop()
                     query_list.extend(
                             [last_group + [lit] for lit in contain_literals]
@@ -177,7 +192,7 @@ class Query:
                     first_value, last_value = corpus.intern(feature, value.encode(), is_prefix)
                     if or_separator == "|":
                         query_list.append([])
-                    query_list[-1].append(Literal(negative, offset, feature, first_value, last_value))
+                    query_list[-1].append(Literal(negative, offset, feature, first_value, last_value, repeat))
             if len(query_list) > 1:
                 query.extend([DisjunctiveGroup.create(literals) for literals in itertools.product(*query_list)])
             else:
